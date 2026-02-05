@@ -8,6 +8,22 @@ from keep_alive import keep_alive
 TOKEN = os.environ.get('TOKEN')
 CHANNEL_ID = 1234567890 # Replace with your Channel ID
 GUILD_ID = 9876543210   # Replace with your Server ID
+To fix the issue where your slash command options aren't showing up, we will implement a "Nuclear Sync". This involves explicitly clearing all old global commands that might be "masking" your new ones and then forcing an instant update specifically to your server.
+
+🛠️ The Full "Nuclear Sync" Code (main.py)
+Replace your entire MarketBot class with this version. This code targets your specific GUILD_ID for an immediate menu refresh.
+
+Python
+import discord
+from discord.ext import tasks, commands
+from discord import app_commands
+import sqlite3, datetime, zoneinfo, random, feedparser, os
+from keep_alive import keep_alive
+
+# --- CONFIG ---
+TOKEN = os.environ.get('TOKEN')
+CHANNEL_ID = 1234567890 # Replace with your Channel ID
+GUILD_ID = 9876543210   # Replace with your Server ID
 EST = zoneinfo.ZoneInfo("America/New_York")
 STARTING_CASH = 500
 
@@ -48,7 +64,7 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
 class BetView(discord.ui.View):
     def __init__(self, label_a: str = "Yes", label_b: str = "No"):
         super().__init__(timeout=None)
-        # Force the labels onto the buttons
+        # Re-adding items forces the UI to use the newest labels
         self.add_item(discord.ui.Button(label=label_a, style=discord.ButtonStyle.green, custom_id="btn_a"))
         self.add_item(discord.ui.Button(label=label_b, style=discord.ButtonStyle.red, custom_id="btn_b"))
         self.add_item(discord.ui.Button(label="🏦 Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal"))
@@ -56,40 +72,34 @@ class BetView(discord.ui.View):
     async def interaction_check(self, interaction: discord.Interaction):
         cid = interaction.data['custom_id']
         res = db_query("SELECT balance FROM users WHERE user_id = ?", (interaction.user.id,), fetch=True)
-        
-        if not res:
-            db_query("INSERT INTO users VALUES (?, ?)", (interaction.user.id, STARTING_CASH))
-            bal = STARTING_CASH
-            role = discord.utils.get(interaction.guild.roles, name="In the Hunt")
-            if role: await interaction.user.add_roles(role)
-        else:
-            bal = res[0][0]
-        
+        bal = res[0][0] if res else STARTING_CASH
         if cid == "btn_bal":
-            await interaction.response.send_message(f"🏦 Your current balance is: **${bal}**", ephemeral=True)
+            await interaction.response.send_message(f"🏦 Balance: **${bal}**", ephemeral=True)
         else:
             label = next(i.label for i in self.children if i.custom_id == cid)
             await interaction.response.send_modal(BetModal(label, bal))
         return True
 
+# --- THE BOT ENGINE ---
 class MarketBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
-        
+
     async def setup_hook(self):
         init_db()
         self.add_view(BetView()) 
         
-        # --- THE INSTANT MENU FIX ---
-        # 1. Clear any old global commands
+        # --- NUCLEAR SYNC PROTOCOL ---
+        # Step 1: Clear old global commands to stop them from overriding your guild commands
         self.tree.clear_commands(guild=None)
+        await self.tree.sync() # Syncing globally with no commands deletes them
         
-        # 2. Sync specifically to YOUR server for instant updates
+        # Step 2: Sync specifically to your server ID for INSTANT updates
         guild_obj = discord.Object(id=GUILD_ID)
         self.tree.copy_global_to(guild=guild_obj)
         await self.tree.sync(guild=guild_obj)
         
-        print(f"✅ Bot Ready and Menu Synced for Guild: {GUILD_ID}")
+        print(f"✅ NUCLEAR SYNC COMPLETE: Commands refreshed for {GUILD_ID}")
 
 bot = MarketBot()
 
@@ -99,27 +109,11 @@ async def create_bet(interaction: discord.Interaction, question: str, answer_a: 
     # Pass labels to the view so the buttons update correctly
     view = BetView(label_a=answer_a, label_b=answer_b)
     embed = discord.Embed(title="⚖️ MARKET OPEN", description=question, color=0x2ecc71)
-    embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
     await interaction.response.send_message(embed=embed, view=view)
 
-@bot.tree.command(name="leaderboard")
-async def setup_hook(self):
-    init_db()
-    self.add_view(BetView()) 
-    
-    # 1. Wipe all existing global commands to remove the old version
-    self.tree.clear_commands(guild=None)
-    await self.tree.sync() # This sends the "delete all" request to Discord
-    
-    # 2. Sync specifically to your server for an instant refresh
-    guild_obj = discord.Object(id=GUILD_ID)
-    self.tree.copy_global_to(guild=guild_obj)
-    await self.tree.sync(guild=guild_obj)
-    
-    print(f"✅ NUCLEAR SYNC COMPLETE: Commands refreshed for {GUILD_ID}")
-
 keep_alive()
-bot.run(os.environ.get('TOKEN'))
+bot.run(TOKEN)
+
 
 
 
