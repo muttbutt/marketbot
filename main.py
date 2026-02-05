@@ -2,22 +2,6 @@ import discord
 from discord.ext import tasks, commands
 from discord import app_commands
 import sqlite3, datetime, zoneinfo, random, feedparser, os
-
-# --- CONFIG ---
-TOKEN = os.getenv('TOKEN')
-CHANNEL_ID = 1468975504899178576 # Replace with your Channel ID
-GUILD_ID = 1140664003371212830   # Replace with your Server ID
-This is the final, polished code. I have updated the BetView to handle dynamic button labels and ensured that the /create_bet command passes your custom answers (like "Yes" and "No") directly to the buttons.
-
-📝 Final Configuration Note
-Make sure you have your Bot Token in the Replit Secrets tool with the key TOKEN. Also, double-check that your Guild ID and Channel ID are correct at the top.
-
-The Complete Final Code (main.py)
-Python
-import discord
-from discord.ext import tasks, commands
-from discord import app_commands
-import sqlite3, datetime, zoneinfo, random, feedparser, os
 from keep_alive import keep_alive
 
 # --- CONFIG ---
@@ -71,6 +55,7 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
 class BetView(discord.ui.View):
     def __init__(self, label_a: str = "Option A", label_b: str = "Option B"):
         super().__init__(timeout=None)
+        # Fix: Manually set the labels to the buttons during initialization
         self.children[0].label = label_a
         self.children[1].label = label_b
 
@@ -100,24 +85,22 @@ class MarketBot(commands.Bot):
 
     async def setup_hook(self):
         init_db()
-        self.add_view(BetView()) # Keeps buttons working after restart
+        self.add_view(BetView()) 
         self.market_loop.start()
-        await self.tree.sync() # Makes Slash Commands show up instantly
+        await self.tree.sync()
 
     @tasks.loop(minutes=1)
     async def market_loop(self):
         now = datetime.datetime.now(EST)
         today = datetime.date.today().isoformat()
 
-        # 9:40 AM Fail-safe
         if now.hour == 9 and now.minute == 40:
             if not db_query("SELECT * FROM history WHERE date = ?", (today,), fetch=True):
                 await self.post_auto_bet()
 
-        # 5:30 PM Automatic Close & Notification
         if now.hour == 17 and now.minute == 30:
             chan = self.get_channel(CHANNEL_ID)
-            await chan.send("🔒 **MARKET CLOSED.** No more bets for today. Processing results soon...")
+            await chan.send("🔒 **MARKET CLOSED.** No more bets for today.")
 
     async def post_auto_bet(self):
         feed = feedparser.parse("https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en")
@@ -125,6 +108,7 @@ class MarketBot(commands.Bot):
         question = f"AUTO-BET: {headline}"
         db_query("INSERT INTO history VALUES (?, ?, 'PENDING')", (datetime.date.today().isoformat(), question))
         chan = self.get_channel(CHANNEL_ID)
+        # Default labels for auto-bets
         await chan.send(embed=discord.Embed(title="🌍 Daily Market Open", description=question, color=0x3498db), view=BetView("Yes", "No"))
 
 bot = MarketBot()
@@ -145,15 +129,15 @@ async def create_bet(interaction: discord.Interaction, question: str, answer_a: 
     today = datetime.date.today().isoformat()
     db_query("INSERT OR REPLACE INTO history VALUES (?, ?, 'PENDING')", (today, question))
     
+    # Passing the labels to the View so the buttons update correctly
     view = BetView(label_a=answer_a, label_b=answer_b)
-    embed = discord.Embed(title="⚖️ POLITICAL MARKET OPEN", description=f"**{question}**", color=0x2ecc71)
-    embed.add_field(name="Option A", value=answer_a, inline=True)
-    embed.add_field(name="Option B", value=answer_b, inline=True)
-    embed.set_footer(text="Market closes at 5:30 PM EST")
+    embed = discord.Embed(title="⚖️ CUSTOM BET", description=question, color=0x2ecc71)
+    embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
     
     await interaction.response.send_message(embed=embed, view=view)
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
+
 
 
