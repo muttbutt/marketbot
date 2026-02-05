@@ -42,16 +42,16 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
             amt = int(self.wager.value)
             if amt > self.balance or amt <= 0: raise ValueError
         except:
-            return await interaction.response.send_message(f"❌ Invalid amount! You only have ${self.balance}.", ephemeral=True)
+            return await interaction.response.send_message(f"❌ Invalid amount! Balance: ${self.balance}", ephemeral=True)
         
         db_query("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amt, interaction.user.id))
         db_query("INSERT INTO bets VALUES (?, ?, ?, ?)", (interaction.user.id, amt, self.choice, datetime.date.today().isoformat()))
         await interaction.response.send_message(f"✅ Bet of ${amt} placed on **{self.choice}**!\nRemaining: **${self.balance - amt}**", ephemeral=True)
 
 class BetView(discord.ui.View):
-    def __init__(self, label_a: str = "Option A", label_b: str = "Option B"):
+    def __init__(self, label_a: str = "Yes", label_b: str = "No"):
         super().__init__(timeout=None)
-        # Fix for custom labels
+        # Manually assign labels to the first two buttons
         self.children[0].label = label_a
         self.children[1].label = label_b
 
@@ -74,10 +74,9 @@ class BetView(discord.ui.View):
         bal = await self.onboarding(interaction)
         await interaction.response.send_modal(BetModal(button.label, bal))
 
-    @discord.ui.button(label="Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal")
+    @discord.ui.button(label="🏦 Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal")
     async def bal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
         bal = await self.onboarding(interaction)
-        # Determine current tier name
         tier = "In the Hunt"
         for thresh, name in sorted(ROLES.items()):
             if bal >= thresh: tier = name
@@ -128,13 +127,17 @@ async def leaderboard(interaction: discord.Interaction):
 async def create_bet(interaction: discord.Interaction, question: str, answer_a: str = "Yes", answer_b: str = "No"):
     today = datetime.date.today().isoformat()
     db_query("INSERT OR REPLACE INTO history VALUES (?, ?, 'PENDING')", (today, question))
+    
+    # Initialize view with custom labels
     view = BetView(label_a=answer_a, label_b=answer_b)
+    
     embed = discord.Embed(title="⚖️ CUSTOM BET", description=question, color=0x2ecc71)
     embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
     await interaction.response.send_message(embed=embed, view=view)
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
+
 
 
 
