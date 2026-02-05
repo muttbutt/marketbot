@@ -11,9 +11,6 @@ GUILD_ID = 9876543210   # Replace with your Server ID
 EST = zoneinfo.ZoneInfo("America/New_York")
 STARTING_CASH = 500
 
-ROLES = {0: "In the Hunt", 1000: "Casual Bettor", 2500: "Novice Better", 
-         5000: "Keeper of Coin", 7500: "Hail to the King", 10000: "The fucking Best"}
-
 # --- DATABASE ENGINE ---
 def db_query(query, params=(), fetch=False):
     conn = sqlite3.connect('market.db')
@@ -27,7 +24,6 @@ def db_query(query, params=(), fetch=False):
 def init_db():
     db_query('CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, balance INTEGER)')
     db_query('CREATE TABLE IF NOT EXISTS bets (user_id INTEGER, amount INTEGER, choice TEXT, date TEXT)')
-    db_query('CREATE TABLE IF NOT EXISTS history (date TEXT PRIMARY KEY, question TEXT, winner TEXT)')
 
 # --- UI COMPONENTS ---
 class BetModal(discord.ui.Modal, title='Place Your Wager'):
@@ -40,7 +36,7 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
             amt = int(self.wager.value)
             if amt > self.balance or amt <= 0: raise ValueError
         except:
-            return await interaction.response.send_message(f"❌ Invalid! Balance: ${self.balance}", ephemeral=True)
+            return await interaction.response.send_message(f"❌ Invalid amount!", ephemeral=True)
         db_query("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amt, interaction.user.id))
         db_query("INSERT INTO bets VALUES (?, ?, ?, ?)", (interaction.user.id, amt, self.choice, datetime.date.today().isoformat()))
         await interaction.response.send_message(f"✅ Bet of ${amt} on {self.choice} placed!", ephemeral=True)
@@ -50,7 +46,7 @@ class BetView(discord.ui.View):
         super().__init__(timeout=None)
         self.add_item(discord.ui.Button(label=label_a, style=discord.ButtonStyle.green, custom_id="btn_a"))
         self.add_item(discord.ui.Button(label=label_b, style=discord.ButtonStyle.red, custom_id="btn_b"))
-        self.add_item(discord.ui.Button(label="🏦 Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal"))
+        self.add_item(discord.ui.Button(label="🏦 Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal"))
 
     async def interaction_check(self, interaction: discord.Interaction):
         cid = interaction.data['custom_id']
@@ -64,28 +60,18 @@ class BetView(discord.ui.View):
         return True
 
 # --- BOT ENGINE ---
-class MarketBot(commands.Bot):
-    def __init__(self):
-        # Using "!" as prefix for the sync command
-        super().__init__(command_prefix="!", intents=discord.Intents.all())
+intents = discord.Intents.all() # CRITICAL: Includes Message Content
+bot = commands.Bot(command_prefix="!", intents=intents)
 
-    async def setup_hook(self):
-        init_db()
-        self.add_view(BetView()) 
+@bot.event
+async def on_ready():
+    init_db()
+    # Force sync on login specifically to your guild
+    guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
+    await bot.tree.sync(guild=guild)
+    print(f"✅ Logged in as {bot.user} and Hard-Synced to {GUILD_ID}")
 
-bot = MarketBot()
-
-# --- MANUAL SYNC COMMAND ---
-@bot.command()
-@commands.is_owner() 
-async def sync(ctx):
-    # Clear and re-sync specifically to your server for instant UI update
-    bot.tree.clear_commands(guild=discord.Object(id=GUILD_ID))
-    bot.tree.copy_global_to(guild=discord.Object(id=GUILD_ID))
-    await bot.tree.sync(guild=discord.Object(id=GUILD_ID))
-    await ctx.send(f"✅ **Hard Sync Complete!** Menu updated for Server: {GUILD_ID}")
-
-# --- THE BET COMMAND WITH TYPE HINTS ---
 @bot.tree.command(name="create_bet", description="Admin: Post a bet with custom labels")
 @app_commands.checks.has_permissions(administrator=True)
 async def create_bet(interaction: discord.Interaction, question: str, answer_a: str = "Yes", answer_b: str = "No"):
@@ -93,6 +79,14 @@ async def create_bet(interaction: discord.Interaction, question: str, answer_a: 
     embed = discord.Embed(title="⚖️ MARKET OPEN", description=question, color=0x2ecc71)
     embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
     await interaction.response.send_message(embed=embed, view=view)
+
+# Manual fallback sync command just in case
+@bot.command()
+async def force_sync(ctx):
+    guild = discord.Object(id=GUILD_ID)
+    bot.tree.copy_global_to(guild=guild)
+    await bot.tree.sync(guild=guild)
+    await ctx.send("✅ Slash commands re-synced to server!")
 
 keep_alive()
 bot.run(TOKEN)
