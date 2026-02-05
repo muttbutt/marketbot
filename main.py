@@ -4,7 +4,7 @@ from discord import app_commands
 import sqlite3, datetime, zoneinfo, random, feedparser, os
 
 # --- CONFIG ---
-TOKEN = os.getenv('MTQ2ODk3MjYyNzQxMzQzNDYxOA.GFdpII.ZniDyvx8gWnMfX4a1Vriwygho2Hxn4rHaEg6Hc')
+TOKEN = os.getenv('TOKEN')
 CHANNEL_ID = 1468975504899178576 # Replace with your Channel ID
 GUILD_ID = 1140664003371212830   # Replace with your Server ID
 EST = zoneinfo.ZoneInfo("America/New_York")
@@ -134,5 +134,6 @@ async def leaderboard(interaction: discord.Interaction):
 async def create_bet(interaction: discord.Interaction, question: str):
     db_query("INSERT OR REPLACE INTO history VALUES (?, ?, 'PENDING')", (datetime.date.today().isoformat(), question))
     await interaction.response.send_message(embed=discord.Embed(title="🎰 CUSTOM BET", description=question, color=0x2ecc71), view=BetView())
+
 
 bot.run(TOKEN)
