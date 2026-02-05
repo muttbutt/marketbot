@@ -103,17 +103,24 @@ async def create_bet(interaction: discord.Interaction, question: str, answer_a: 
     await interaction.response.send_message(embed=embed, view=view)
 
 @bot.tree.command(name="leaderboard")
-async def leaderboard(interaction: discord.Interaction):
-    data = db_query("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10", fetch=True)
-    embed = discord.Embed(title="🏆 TOP 10 BETTORS", color=0xFFD700)
-    for i, (uid, bal) in enumerate(data, 1):
-        member = interaction.guild.get_member(uid)
-        name = member.display_name if member else f"User {uid}"
-        embed.add_field(name=f"{i}. {name}", value=f"${bal}", inline=False)
-    await interaction.response.send_message(embed=embed)
+async def setup_hook(self):
+    init_db()
+    self.add_view(BetView()) 
+    
+    # 1. Wipe all existing global commands to remove the old version
+    self.tree.clear_commands(guild=None)
+    await self.tree.sync() # This sends the "delete all" request to Discord
+    
+    # 2. Sync specifically to your server for an instant refresh
+    guild_obj = discord.Object(id=GUILD_ID)
+    self.tree.copy_global_to(guild=guild_obj)
+    await self.tree.sync(guild=guild_obj)
+    
+    print(f"✅ NUCLEAR SYNC COMPLETE: Commands refreshed for {GUILD_ID}")
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
+
 
 
 
