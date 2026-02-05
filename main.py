@@ -14,6 +14,7 @@ STARTING_CASH = 500
 ROLES = {0: "In the Hunt", 1000: "Casual Bettor", 2500: "Novice Better", 
          5000: "Keeper of Coin", 7500: "Hail to the King", 10000: "The fucking Best"}
 
+# --- DATABASE ENGINE ---
 def db_query(query, params=(), fetch=False):
     conn = sqlite3.connect('market.db')
     c = conn.cursor()
@@ -28,6 +29,7 @@ def init_db():
     db_query('CREATE TABLE IF NOT EXISTS bets (user_id INTEGER, amount INTEGER, choice TEXT, date TEXT)')
     db_query('CREATE TABLE IF NOT EXISTS history (date TEXT PRIMARY KEY, question TEXT, winner TEXT)')
 
+# --- UI COMPONENTS ---
 class BetModal(discord.ui.Modal, title='Place Your Wager'):
     wager = discord.ui.TextInput(label='Amount', placeholder='e.g. 100', min_length=1)
     def __init__(self, choice, balance):
@@ -41,7 +43,7 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
             return await interaction.response.send_message(f"❌ Invalid! Balance: ${self.balance}", ephemeral=True)
         db_query("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amt, interaction.user.id))
         db_query("INSERT INTO bets VALUES (?, ?, ?, ?)", (interaction.user.id, amt, self.choice, datetime.date.today().isoformat()))
-        await interaction.response.send_message(f"✅ Bet of ${amt} on {self.choice}!", ephemeral=True)
+        await interaction.response.send_message(f"✅ Bet of ${amt} on {self.choice} placed!", ephemeral=True)
 
 class BetView(discord.ui.View):
     def __init__(self, label_a: str = "Yes", label_b: str = "No"):
@@ -49,15 +51,22 @@ class BetView(discord.ui.View):
         # Force the labels onto the buttons
         self.add_item(discord.ui.Button(label=label_a, style=discord.ButtonStyle.green, custom_id="btn_a"))
         self.add_item(discord.ui.Button(label=label_b, style=discord.ButtonStyle.red, custom_id="btn_b"))
-        self.add_item(discord.ui.Button(label="🏦 Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal"))
+        self.add_item(discord.ui.Button(label="🏦 Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal"))
 
     async def interaction_check(self, interaction: discord.Interaction):
         cid = interaction.data['custom_id']
         res = db_query("SELECT balance FROM users WHERE user_id = ?", (interaction.user.id,), fetch=True)
-        bal = res[0][0] if res else db_query("INSERT INTO users VALUES (?, ?)", (interaction.user.id, STARTING_CASH)) or STARTING_CASH
+        
+        if not res:
+            db_query("INSERT INTO users VALUES (?, ?)", (interaction.user.id, STARTING_CASH))
+            bal = STARTING_CASH
+            role = discord.utils.get(interaction.guild.roles, name="In the Hunt")
+            if role: await interaction.user.add_roles(role)
+        else:
+            bal = res[0][0]
         
         if cid == "btn_bal":
-            await interaction.response.send_message(f"🏦 Balance: **${bal}**", ephemeral=True)
+            await interaction.response.send_message(f"🏦 Your current balance is: **${bal}**", ephemeral=True)
         else:
             label = next(i.label for i in self.children if i.custom_id == cid)
             await interaction.response.send_modal(BetModal(label, bal))
@@ -66,23 +75,46 @@ class BetView(discord.ui.View):
 class MarketBot(commands.Bot):
     def __init__(self):
         super().__init__(command_prefix="!", intents=discord.Intents.all())
+        
     async def setup_hook(self):
         init_db()
-        await self.tree.sync() # This makes answer_a and answer_b appear!
-        print("Bot Ready and Synced")
+        self.add_view(BetView()) 
+        
+        # --- THE INSTANT MENU FIX ---
+        # 1. Clear any old global commands
+        self.tree.clear_commands(guild=None)
+        
+        # 2. Sync specifically to YOUR server for instant updates
+        guild_obj = discord.Object(id=GUILD_ID)
+        self.tree.copy_global_to(guild=guild_obj)
+        await self.tree.sync(guild=guild_obj)
+        
+        print(f"✅ Bot Ready and Menu Synced for Guild: {GUILD_ID}")
 
 bot = MarketBot()
 
-@bot.tree.command(name="create_bet")
+@bot.tree.command(name="create_bet", description="Admin: Post a bet with custom labels")
 @app_commands.checks.has_permissions(administrator=True)
 async def create_bet(interaction: discord.Interaction, question: str, answer_a: str = "Yes", answer_b: str = "No"):
-    # This command now has 3 arguments that Discord will show you
+    # Pass labels to the view so the buttons update correctly
     view = BetView(label_a=answer_a, label_b=answer_b)
     embed = discord.Embed(title="⚖️ MARKET OPEN", description=question, color=0x2ecc71)
+    embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
     await interaction.response.send_message(embed=embed, view=view)
+
+@bot.tree.command(name="leaderboard")
+async def leaderboard(interaction: discord.Interaction):
+    data = db_query("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10", fetch=True)
+    embed = discord.Embed(title="🏆 TOP 10 BETTORS", color=0xFFD700)
+    for i, (uid, bal) in enumerate(data, 1):
+        member = interaction.guild.get_member(uid)
+        name = member.display_name if member else f"User {uid}"
+        embed.add_field(name=f"{i}. {name}", value=f"${bal}", inline=False)
+    await interaction.response.send_message(embed=embed)
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
+
 
 
 
