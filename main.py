@@ -136,4 +136,5 @@ async def create_bet(interaction: discord.Interaction, question: str):
     await interaction.response.send_message(embed=discord.Embed(title="🎰 CUSTOM BET", description=question, color=0x2ecc71), view=BetView())
 
 
-bot.run(TOKEN)
+bot.run(os.environ.get('TOKEN'))
+
