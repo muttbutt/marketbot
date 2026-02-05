@@ -35,8 +35,7 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
     
     def __init__(self, choice, balance):
         super().__init__()
-        self.choice = choice
-        self.balance = balance
+        self.choice, self.balance = choice, balance
 
     async def on_submit(self, interaction: discord.Interaction):
         try:
@@ -45,17 +44,14 @@ class BetModal(discord.ui.Modal, title='Place Your Wager'):
         except:
             return await interaction.response.send_message(f"❌ Invalid amount! You only have ${self.balance}.", ephemeral=True)
         
-        today = datetime.date.today().isoformat()
         db_query("UPDATE users SET balance = balance - ? WHERE user_id = ?", (amt, interaction.user.id))
-        db_query("INSERT INTO bets VALUES (?, ?, ?, ?)", (interaction.user.id, amt, self.choice, today))
-        
-        new_bal = self.balance - amt
-        await interaction.response.send_message(f"✅ Bet of ${amt} placed on **{self.choice}**!\nRemaining Balance: **${new_bal}**", ephemeral=True)
+        db_query("INSERT INTO bets VALUES (?, ?, ?, ?)", (interaction.user.id, amt, self.choice, datetime.date.today().isoformat()))
+        await interaction.response.send_message(f"✅ Bet of ${amt} placed on **{self.choice}**!\nRemaining: **${self.balance - amt}**", ephemeral=True)
 
 class BetView(discord.ui.View):
     def __init__(self, label_a: str = "Option A", label_b: str = "Option B"):
         super().__init__(timeout=None)
-        # Fix: Manually set the labels to the buttons during initialization
+        # Fix for custom labels
         self.children[0].label = label_a
         self.children[1].label = label_b
 
@@ -78,6 +74,15 @@ class BetView(discord.ui.View):
         bal = await self.onboarding(interaction)
         await interaction.response.send_modal(BetModal(button.label, bal))
 
+    @discord.ui.button(label="Check Balance", style=discord.ButtonStyle.blurple, custom_id="btn_bal")
+    async def bal_btn(self, interaction: discord.Interaction, button: discord.ui.Button):
+        bal = await self.onboarding(interaction)
+        # Determine current tier name
+        tier = "In the Hunt"
+        for thresh, name in sorted(ROLES.items()):
+            if bal >= thresh: tier = name
+        await interaction.response.send_message(f"🏦 **Your Account**\nBalance: **${bal}**\nRank: **{tier}**", ephemeral=True)
+
 # --- BOT ENGINE ---
 class MarketBot(commands.Bot):
     def __init__(self):
@@ -92,52 +97,45 @@ class MarketBot(commands.Bot):
     @tasks.loop(minutes=1)
     async def market_loop(self):
         now = datetime.datetime.now(EST)
-        today = datetime.date.today().isoformat()
-
         if now.hour == 9 and now.minute == 40:
-            if not db_query("SELECT * FROM history WHERE date = ?", (today,), fetch=True):
+            if not db_query("SELECT * FROM history WHERE date = ?", (datetime.date.today().isoformat(),), fetch=True):
                 await self.post_auto_bet()
-
         if now.hour == 17 and now.minute == 30:
             chan = self.get_channel(CHANNEL_ID)
-            await chan.send("🔒 **MARKET CLOSED.** No more bets for today.")
+            if chan: await chan.send("🔒 **MARKET CLOSED.**")
 
     async def post_auto_bet(self):
         feed = feedparser.parse("https://news.google.com/rss?hl=en-US&gl=US&ceid=US:en")
         headline = feed.entries[0].title if feed.entries else "Will the market end green?"
-        question = f"AUTO-BET: {headline}"
-        db_query("INSERT INTO history VALUES (?, ?, 'PENDING')", (datetime.date.today().isoformat(), question))
+        db_query("INSERT INTO history VALUES (?, ?, 'PENDING')", (datetime.date.today().isoformat(), headline))
         chan = self.get_channel(CHANNEL_ID)
-        # Default labels for auto-bets
-        await chan.send(embed=discord.Embed(title="🌍 Daily Market Open", description=question, color=0x3498db), view=BetView("Yes", "No"))
+        if chan: await chan.send(embed=discord.Embed(title="🌍 Market Open", description=headline, color=0x3498db), view=BetView("Yes", "No"))
 
 bot = MarketBot()
 
-@bot.tree.command(name="leaderboard", description="View the top 10 richest players")
+@bot.tree.command(name="leaderboard")
 async def leaderboard(interaction: discord.Interaction):
     data = db_query("SELECT user_id, balance FROM users ORDER BY balance DESC LIMIT 10", fetch=True)
-    embed = discord.Embed(title="🏆 MARKET LEADERBOARD", color=0xFFD700)
+    embed = discord.Embed(title="🏆 TOP 10 BETTORS", color=0xFFD700)
     for i, (uid, bal) in enumerate(data, 1):
         member = interaction.guild.get_member(uid)
         name = member.display_name if member else f"User {uid}"
         embed.add_field(name=f"{i}. {name}", value=f"${bal}", inline=False)
     await interaction.response.send_message(embed=embed)
 
-@bot.tree.command(name="create_bet", description="Admin: Create a bet with custom button labels")
+@bot.tree.command(name="create_bet")
 @app_commands.checks.has_permissions(administrator=True)
 async def create_bet(interaction: discord.Interaction, question: str, answer_a: str = "Yes", answer_b: str = "No"):
     today = datetime.date.today().isoformat()
     db_query("INSERT OR REPLACE INTO history VALUES (?, ?, 'PENDING')", (today, question))
-    
-    # Passing the labels to the View so the buttons update correctly
     view = BetView(label_a=answer_a, label_b=answer_b)
     embed = discord.Embed(title="⚖️ CUSTOM BET", description=question, color=0x2ecc71)
     embed.add_field(name="Options", value=f"🟢 {answer_a}\n🔴 {answer_b}")
-    
     await interaction.response.send_message(embed=embed, view=view)
 
 keep_alive()
 bot.run(os.environ.get('TOKEN'))
+
 
 
 
